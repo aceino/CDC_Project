@@ -91,3 +91,10 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect
       KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
+ 
+  redis:
+    image: redis:7.2-bookworm
+    container_name: cdc_redis
+    ports:
+      - "6379:6379"
+    restart: "no"  

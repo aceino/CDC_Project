@@ -3,6 +3,8 @@ import os
 import time
 from confluent_kafka import Consumer, KafkaError, Producer
 from connection import get_connection
+import redis
+
 
 KAFKA_CONFIG = {
     'bootstrap.servers': os.getenv('KAFKA_BOOTSTRAP', 'localhost:9092'),
@@ -16,6 +18,13 @@ PRODUCER_CONFIG = {
 
 dlq_producer = Producer(PRODUCER_CONFIG)
 DLQ_TOPIC = 'cdc_orders_dlq'
+
+redis_client = redis.Redis(
+    host= os.getenv('REDIS_HOST', 'localhost'),
+    port = os.getenv('REDIS_PORT', 6379),
+    db=0,
+    decode_responses=True
+)
 
 def send_to_dlq(raw_message_str, error_msg):
     dlq_payload = { 
@@ -55,6 +64,7 @@ def upsert_target_orders(cur, data):
         )
     )
     print(f"✅ [SYNC UPSERT] Target order #{data['id']} synced! (Status: {data['status']})")
+    sync_order_to_redis(data)
 
 def upsert_target_order_items(cur, data):
     cur.execute(
@@ -85,6 +95,7 @@ def soft_delete_target_orders(cur, data):
         (order_id,)
     )
     print(f"⚠️ [SYNC SOFT-DELETE] Target order #{order_id} marked as IS_DELETED = TRUE")
+    evict_order_from_redis(data)
 
 def soft_delete_target_order_items(cur, data):
     """Marks item as soft-deleted in target_order_items."""
@@ -98,6 +109,18 @@ def soft_delete_target_order_items(cur, data):
         (item_id,)
     )
     print(f"⚠️ [SYNC ITEM SOFT-DELETE] Order item #{item_id} marked IS_DELETED = TRUE")
+
+def sync_order_to_redis(data) : 
+    order_id = data["id"]
+    key = f"order: {order_id}"
+    redis_client.set(key, json.dumps(data), ex=86400)
+    print(f"[REDIS CACHE] Updated Key {key} in sub-milisecond RAM")
+
+def evict_order_from_redis(data) : 
+    order_id = data["id"]
+    key = f"order:{order_id}"
+    redis_client.delete(key)
+    print(f" [REDIS PURGE] Evicted key '{key}' from Cache")
 
 # Handler Dispatch Map (defined after functions)
 HANDLERS = { 
@@ -130,7 +153,7 @@ def main():
             if msg.error():
                 print(f"Kafka Error: {msg.error()}")
                 continue 
-                
+
             raw_data = msg.value().decode('utf-8')
 
             try:

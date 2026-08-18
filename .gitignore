@@ -11,7 +11,6 @@ wheels/
 .claude
 uv.lock
 .env
-
 .vscode
 .python-version
 pyproject.toml
